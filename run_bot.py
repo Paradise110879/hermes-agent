@@ -1,30 +1,33 @@
+import sys
 import os
 import logging
 import traceback
+
+# اضافه کردن مسیر پروژه به پایتون جهت پیدا کردن سورس‌ها
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 
-# تلاش برای بارگذاری و تشخیص ساختار Hermes Agent
 agent = None
 init_error = None
 
+# تلاش برای Import ایجنت هرمس
 try:
-    # چک کردن ساختارهای مختلف Import در ریپوزیتوری رسمی
     try:
-        from hermes_agent.agent import HermesAgent
+        from hermes import HermesAgent
         agent = HermesAgent()
-        print("=== HermesAgent successfully loaded from hermes_agent.agent ===")
+        print("=== HermesAgent loaded via 'hermes' ===")
     except ImportError:
         try:
-            from src.hermes_agent.agent import HermesAgent
+            from hermes_agent import HermesAgent
             agent = HermesAgent()
-            print("=== HermesAgent successfully loaded from src.hermes_agent.agent ===")
+            print("=== HermesAgent loaded via 'hermes_agent' ===")
         except ImportError:
-            import hermes_agent
-            print(f"=== Module hermes_agent found. Attributes: {dir(hermes_agent)} ===")
-            init_error = f"HermesAgent class not directly found. Available attributes: {dir(hermes_agent)}"
+            from run import main as hermes_main
+            print("=== Found run.py in root ===")
 except Exception as e:
     init_error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
     print(f"Error initializing Hermes Agent:\n{init_error}")
@@ -38,15 +41,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if agent:
         try:
-            # فراخوانی متد پاسخ‌دهی ایجنت
             if hasattr(agent, 'run'):
                 response = agent.run(user_text)
+            elif hasattr(agent, 'chat'):
+                response = agent.chat(user_text)
             elif hasattr(agent, 'ask'):
                 response = agent.ask(user_text)
-            elif hasattr(agent, '__call__'):
-                response = agent(user_text)
             else:
-                response = f"Agent loaded but no supported call method found. Methods: {dir(agent)}"
+                response = f"متد اجرا یافت نشد. المت‌های موجود: {dir(agent)}"
         except Exception as e:
             response = f"خطا در پردازش ایجنت: {str(e)}"
     else:
