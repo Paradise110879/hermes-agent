@@ -1,32 +1,56 @@
 import os
 import logging
+import traceback
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# خروجی لاگ‌ها را آنی و زنده می‌کند
 logging.basicConfig(level=logging.INFO)
 
-# فراخوانی ایجنت هرمس (با فرض اینکه هرمس کلاس یا تابع اصلی دارد)
-# در صورت نیاز می‌توانید مسیر import را با توجه به ساختار پروژه تغییر دهید
+# تلاش برای بارگذاری و تشخیص ساختار Hermes Agent
+agent = None
+init_error = None
+
 try:
-    from hermes_agent import HermesAgent
-    agent = HermesAgent()
+    # چک کردن ساختارهای مختلف Import در ریپوزیتوری رسمی
+    try:
+        from hermes_agent.agent import HermesAgent
+        agent = HermesAgent()
+        print("=== HermesAgent successfully loaded from hermes_agent.agent ===")
+    except ImportError:
+        try:
+            from src.hermes_agent.agent import HermesAgent
+            agent = HermesAgent()
+            print("=== HermesAgent successfully loaded from src.hermes_agent.agent ===")
+        except ImportError:
+            import hermes_agent
+            print(f"=== Module hermes_agent found. Attributes: {dir(hermes_agent)} ===")
+            init_error = f"HermesAgent class not directly found. Available attributes: {dir(hermes_agent)}"
 except Exception as e:
-    print(f"Error loading Hermes Agent: {e}")
-    agent = None
+    init_error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+    print(f"Error initializing Hermes Agent:\n{init_error}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! ربات Hermes Agent روشن و آماده پاسخگویی است.")
+    await update.message.reply_text("سلام! ربات Hermes Agent فعال است. سوال خود را بپرسید.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
-    print(f"Received message: {user_text}")
+    print(f"Received message from Telegram: {user_text}")
     
     if agent:
-        # ارسال متن به هرمس و دریافت پاسخ
-        response = agent.run(user_text) 
+        try:
+            # فراخوانی متد پاسخ‌دهی ایجنت
+            if hasattr(agent, 'run'):
+                response = agent.run(user_text)
+            elif hasattr(agent, 'ask'):
+                response = agent.ask(user_text)
+            elif hasattr(agent, '__call__'):
+                response = agent(user_text)
+            else:
+                response = f"Agent loaded but no supported call method found. Methods: {dir(agent)}"
+        except Exception as e:
+            response = f"خطا در پردازش ایجنت: {str(e)}"
     else:
-        response = "موتور ایجنت هنوز بارگذاری نشده است."
+        response = f"موتور ایجنت بارگذاری نشد.\n\nجزئیات خطا:\n{init_error}"
 
     await update.message.reply_text(str(response))
 
