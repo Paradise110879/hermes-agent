@@ -1,50 +1,86 @@
 import sys
 import os
 import logging
+from openai import OpenAI
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+# خواندن متغیرها از محیط Railway
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-def get_project_structure(start_path='.'):
-    tree = []
-    ignore_dirs = {'.git', '__pycache__', '.venv', 'venv', 'node_modules'}
-    for root, dirs, files in os.walk(start_path):
-        dirs[:] = [d for d in dirs if d not in ignore_dirs]
-        rel_path = os.path.relpath(root, start_path)
-        py_files = [f for f in files if f.endswith('.py')]
-        if py_files:
-            tree.append(f"FOLDER: {rel_path}\n   - " + "\n   - ".join(py_files))
-    return "\n\n".join(tree) if tree else "No python files found."
+# راه‌اندازی کلاینت هوش مصنوعی
+client = None
+if OPENAI_API_KEY:
+    client = OpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url=OPENAI_API_BASE
+    )
+
+# تاریخچه کوتاه پیام‌ها برای حفظ حافظه گفتگو
+chat_histories = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ready. Send any message to scan structure.")
+    user_id = update.effective_user.id
+    chat_histories[user_id] = [
+        {"role": "system", "content": "You are Hermes Agent, a helpful, intelligent AI assistant."}
+    ]
+    await update.message.reply_text("سلام! من Hermes Agent هستم. چطور می‌توانم کمکتان کنم؟")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("Received scan request...")
-    structure = get_project_structure()
-    header = "PROJECT STRUCTURE:\n\n"
-    full_text = header + structure
+    user_id = update.effective_user.id
+    user_text = update.message.text
     
-    # ارسال در قالب تکه‌های امن ۲۰۰۰ تایی بدون Markdown
-    chunk_size = 2000
-    for i in range(0, len(full_text), chunk_size):
-        await update.message.reply_text(full_text[i:i+chunk_size])
+    if not client:
+        await update.message.reply_text("خطا: کلید OPENAI_API_KEY در متغیرهای Railway تنظیم نشده است.")
+        return
+
+    # مقداردهی اولیه حافظه کاربر
+    if user_id not in chat_histories:
+        chat_histories[user_id] = [
+            {"role": "system", "content": "You are Hermes Agent, a helpful, intelligent AI assistant."}
+        ]
+
+    # افزودن پیام کاربر به تاریخچه
+    chat_histories[user_id].append({"role": "user", "content": user_text})
+    
+    # نگه‌داشتن فقط ۱۰ پیام اخیر برای مدیریت حافظه
+    if len(chat_histories[user_id]) > 10:
+        chat_histories[user_id] = [chat_histories[user_id][0]] + chat_histories[user_id][-9:]
+
+    try:
+        # ارسال پیام به هوش مصنوعی
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=chat_histories[user_id]
+        )
+        
+        ai_reply = response.choices[0].message.content
+        chat_histories[user_id].append({"role": "assistant", "content": ai_reply})
+        
+        await update.message.reply_text(ai_reply)
+
+    except Exception as e:
+        error_msg = f"خطا در دریافت پاسخ از مدل:\n{str(e)}"
+        print(error_msg)
+        await update.message.reply_text(error_msg)
 
 def main():
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise ValueError("TELEGRAM_BOT_TOKEN is not set!")
+    if not TELEGRAM_BOT_TOKEN:
+        raise ValueError("متغیر TELEGRAM_BOT_TOKEN ست نشده است!")
 
-    app = Application.builder().token(token).build()
+    print("=== Hermes Agent Telegram Bot is Starting ===")
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Scanner Bot is running...")
-    # drop_pending_updates=True کانفلیکت‌های قبلی را پاک می‌کند
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
