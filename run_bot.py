@@ -1,60 +1,40 @@
 import sys
 import os
 import logging
-import traceback
-
-# اضافه کردن مسیر پروژه به پایتون جهت پیدا کردن سورس‌ها
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 
-agent = None
-init_error = None
+# اضافه کردن مسیر جاری به PYTHONPATH
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
-# تلاش برای Import ایجنت هرمس
-try:
-    try:
-        from hermes import HermesAgent
-        agent = HermesAgent()
-        print("=== HermesAgent loaded via 'hermes' ===")
-    except ImportError:
-        try:
-            from hermes_agent import HermesAgent
-            agent = HermesAgent()
-            print("=== HermesAgent loaded via 'hermes_agent' ===")
-        except ImportError:
-            from run import main as hermes_main
-            print("=== Found run.py in root ===")
-except Exception as e:
-    init_error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-    print(f"Error initializing Hermes Agent:\n{init_error}")
+def get_project_structure(start_path='.'):
+    """لیست تمام فایل‌ها و پوشه‌های پایتون پروژه را استخراج می‌کند"""
+    tree = []
+    ignore_dirs = {'.git', '__pycache__', '.venv', 'venv', 'node_modules'}
+    for root, dirs, files in os.walk(start_path):
+        dirs[:] = [d for d in dirs if d not in ignore_dirs]
+        rel_path = os.path.relpath(root, start_path)
+        py_files = [f for f in files if f.endswith('.py')]
+        if py_files:
+            tree.append(f"📁 {rel_path}/\n   📄 " + "\n   📄 ".join(py_files))
+    return "\n\n".join(tree) if tree else "هیچ فایل پایتونی یافت نشد."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! ربات Hermes Agent فعال است. سوال خود را بپرسید.")
+    await update.message.reply_text("ربات اسکنر آماده است. یک پیام بفرستید تا ساختار فایل‌ها ارسال شود.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
-    print(f"Received message from Telegram: {user_text}")
+    print("Received scan request...")
+    structure = get_project_structure()
+    response = f"🔍 **ساختار فایل‌های پایتون در پروژه شما:**\n\n{structure}"
     
-    if agent:
-        try:
-            if hasattr(agent, 'run'):
-                response = agent.run(user_text)
-            elif hasattr(agent, 'chat'):
-                response = agent.chat(user_text)
-            elif hasattr(agent, 'ask'):
-                response = agent.ask(user_text)
-            else:
-                response = f"متد اجرا یافت نشد. المت‌های موجود: {dir(agent)}"
-        except Exception as e:
-            response = f"خطا در پردازش ایجنت: {str(e)}"
-    else:
-        response = f"موتور ایجنت بارگذاری نشد.\n\nجزئیات خطا:\n{init_error}"
-
-    await update.message.reply_text(str(response))
+    # اگر متن خیلی طولانی بود آن را خرد می‌کند
+    if len(response) > 4000:
+        response = response[:4000] + "\n\n...(ادامه فایل‌ها به دلیل محدودیست تلگرام حذف شد)"
+        
+    await update.message.reply_text(response, parse_mode='Markdown')
 
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -65,7 +45,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("Bot is starting polling...")
+    print("Scanner Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
