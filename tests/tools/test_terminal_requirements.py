@@ -1,6 +1,6 @@
 import importlib
 import logging
-ruamel.yaml>=0.17.0
+
 import pytest
 
 
